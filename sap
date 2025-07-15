@@ -1,0 +1,204 @@
+*&---------------------------------------------------------------------*
+*& Report ZXLSX_TO_INTERNAL_TABLE
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT zxlsx_to_internal_table.
+
+DATA: lt_employee TYPE STANDARD TABLE OF zasset_tracking,
+      wa_employee TYPE zasset_tracking.
+FIELD-SYMBOLS: <gt_data> TYPE STANDARD TABLE.
+
+DATA: lv_file TYPE string,
+      lv_rc   TYPE i.
+
+DATA:lt_file_table TYPE filetable,
+     ls_file_table TYPE file_table.
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-002.
+  PARAMETERS: p_file TYPE ibipparms-path.
+SELECTION-SCREEN END OF BLOCK b1.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_file.
+  DATA: lv_rc   TYPE i.
+  DATA:It_file_table TYPE filetable,
+       ls_file_table TYPE file_table.
+
+  CALL METHOD cl_gui_frontend_services=>file_open_dialog
+    EXPORTING
+      window_title = 'Select a file'
+    CHANGING
+      file_table   = It_file_table
+      rc           = lv_rc.
+
+  IF sy-subrc = 0.
+    READ TABLE it_file_table INTO ls_file_table INDEX 1.
+    p_file = ls_file_table-filename.
+  ENDIF.
+
+START-OF-SELECTION.
+  PERFORM read_file.
+  PERFORM process_file.
+
+*&---------------------------------------------------------------------*
+*& Form read_file
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM read_file .
+  DATA: lv_filename      TYPE string,
+        It_records       TYPE solix_tab,
+        lv_headerxstring TYPE xstring,
+        lv_filelength    TYPE i.
+  lv_filename = p_file.
+
+  CALL FUNCTION 'GUI_UPLOAD'
+    EXPORTING
+      filename                = lv_filename
+      filetype                = 'BIN'
+    IMPORTING
+      filelength              = lv_filelength
+      header                  = lv_headerxstring
+    TABLES
+      data_tab                = it_records
+    EXCEPTIONS
+      file_open_error         = 1
+      file_read_error         = 2
+      no_batch                = 3
+      gui_refuse_filetransfer = 4
+      invalid_type            = 5
+      no_authority            = 6
+      unknown_error           = 7
+      bad_data_format         = 8
+      header_not_allowed      = 9
+      separator_not_allowed   = 10
+      header_too_long         = 11
+      unknown_dp_error        = 12
+      access_denied           = 13
+      dp_out_of_memory        = 14
+      disk_full               = 15
+      dp_timeout              = 16
+      OTHERS                  = 17.
+
+  "convert binary data to xstring
+  "if you are using cl_fdt_xl_spreadsheet in odata then skips this step
+  "as excel file will already be in xstring
+  CALL FUNCTION 'SCMS_BINARY_TO_XSTRING'
+    EXPORTING
+      input_length = lv_filelength
+    IMPORTING
+      buffer       = lv_headerxstring
+    TABLES
+      binary_tab   = it_records
+    EXCEPTIONS
+      failed       = 1
+      OTHERS       = 2.
+
+  IF sy-subrc <> 0.
+    "Implement suitable error handling here
+  ENDIF.
+
+  DATA: lo_excel_ref TYPE REF TO cl_fdt_xl_spreadsheet.
+
+  TRY.
+      lo_excel_ref = NEW cl_fdt_xl_spreadsheet(
+                    document_name = lv_filename
+                     xdocument = lv_headerxstring ).
+    CATCH cx_fdt_excel_core.
+      "Implement suitable error handling here
+  ENDTRY.
+
+  "Get List of Worksheets
+  lo_excel_ref->if_fdt_doc_spreadsheet~get_worksheet_names(
+  IMPORTING
+  worksheet_names = DATA(lt_worksheets) ).
+  IF NOT lt_worksheets IS INITIAL.
+    READ TABLE lt_worksheets INTO DATA(lv_woksheetname) INDEX 1.
+    DATA(lo_data_ref) = lo_excel_ref->if_fdt_doc_spreadsheet~get_itab_from_worksheet( lv_woksheetname ).
+
+    "now you have excel vork sheet data in dyanmic internal table
+    ASSIGN lo_data_ref->* TO <gt_data>.
+  ENDIF.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form process_file
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM process_file .
+  DATA: lv_numberofcolumns   TYPE i,
+        lv_date_string       TYPE string,
+        Iv_target_date_field TYPE datum.
+
+  DATA:  lo_alv  TYPE REF TO cl_salv_table.
+  DATA:lo_columns TYPE REF TO cl_salv_columns_table.
+  DATA:lo_column TYPE REF TO cl_salv_column_table.
+  TYPES: BEGIN OF ty_excel,
+           a TYPE zasset_tracking-emp_id,
+           b TYPE zasset_tracking-asset_id,
+           c TYPE zasset_tracking-emp_name,
+           d TYPE zasset_tracking-asset_type,
+           e TYPE zasset_tracking-assigned_date,
+           f TYPE zasset_tracking-return_date,
+           g TYPE zasset_tracking-status,
+         END OF ty_excel.
+
+  DATA : ls_excel TYPE ty_excel.
+
+  FIELD-SYMBOLS: <ls_data>  TYPE any,
+                 <lv_field> TYPE any.
+
+  LOOP AT <gt_data> ASSIGNING <ls_data> FROM 2.
+    ASSIGN COMPONENT sy-index OF STRUCTURE <ls_data> TO <lv_field>.
+    IF sy-subrc = 0.
+      CASE sy-index.
+*when 1.
+*when 2.
+        WHEN OTHERS.
+          MOVE-CORRESPONDING <lv_field> TO ls_excel.
+          wa_employee-emp_id = ls_excel-a.
+          wa_employee-asset_id = ls_excel-b.
+          wa_employee-emp_name = ls_excel-c.
+          wa_employee-asset_type = ls_excel-d.
+          wa_employee-assigned_date = ls_excel-e.
+          wa_employee-return_date = ls_excel-f.
+          wa_employee-status = ls_excel-g.
+
+          MOVE-CORRESPONDING ls_excel TO  wa_employee.
+          APPEND wa_employee TO lt_employee.
+          CLEAR  wa_employee.
+      ENDCASE.
+    ENDIF.
+    NEW-LINE.
+  ENDLOOP.
+
+  TRY.
+      cl_salv_table=>factory(
+       IMPORTING r_salv_table = lo_alv
+       CHANGING t_table = lt_employee ).
+
+      lo_columns = lo_alv->get_columns( ).
+
+      lo_column ?= lo_columns->get_column( 'ASSIGNED_DATE' ).
+      lo_column->set_short_text( 'Ass date' ).
+      lo_column->set_medium_text( 'Assigned date').
+      lo_column->set_long_text( 'Assigned date').
+
+      lo_column ?= lo_columns->get_column( 'RETURN_DATE' ).
+      lo_column->set_short_text( 'Ret date ' ).
+      lo_column->set_medium_text( 'Return date').
+      lo_column->set_long_text( 'Return date').
+
+      lo_alv->display( ).
+
+    CATCH cx_salv_msg INTO DATA(lx_msg).
+      MESSAGE lx_msg->get_text( ) TYPE 'e'.
+  ENDTRY.
+
+ENDFORM.
