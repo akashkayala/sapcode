@@ -15,9 +15,25 @@ DATA: lv_file TYPE string,
 DATA:lt_file_table TYPE filetable,
      ls_file_table TYPE file_table.
 
+PARAMETERS: rb_app RADIOBUTTON GROUP grp1 DEFAULT 'X' USER-COMMAND rad,
+            rb_pre RADIOBUTTON GROUP grp1.
 SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-002.
-  PARAMETERS: p_file TYPE ibipparms-path.
+  PARAMETERS: p_file TYPE ibipparms-path MODIF ID a.
+  PARAMETERS: p_serv TYPE rlgrap-filename MODIF ID b.
 SELECTION-SCREEN END OF BLOCK b1.
+
+AT SELECTION-SCREEN OUTPUT.
+
+  LOOP AT SCREEN.
+    IF rb_app = 'X' AND screen-group1 = 'B'.
+      screen-active = 1.
+    ELSEIF rb_pre = 'X' AND screen-group1 = 'A'.
+      screen-active = 1.
+    ELSEIF screen-group1 = 'A' OR screen-group1 = 'B'.
+      screen-active = 0.
+    ENDIF.
+    MODIFY SCREEN.
+  ENDLOOP.
 
 AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_file.
   DATA: lv_rc   TYPE i.
@@ -37,8 +53,15 @@ AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_file.
   ENDIF.
 
 START-OF-SELECTION.
+  IF rb_app = 'X'.
+
+
+  ELSEIF rb_pre = 'X'.
   PERFORM read_file.
   PERFORM process_file.
+
+  ENDIF.
+
 
 *&---------------------------------------------------------------------*
 *& Form read_file
@@ -185,6 +208,11 @@ FORM process_file .
 
       lo_columns = lo_alv->get_columns( ).
 
+      lo_column ?= lo_columns->get_column( 'ASSET_TYPE' ).
+      lo_column->set_short_text( 'Ass type' ).
+      lo_column->set_medium_text( 'Asset type').
+      lo_column->set_long_text( 'Asset type').
+
       lo_column ?= lo_columns->get_column( 'ASSIGNED_DATE' ).
       lo_column->set_short_text( 'Ass date' ).
       lo_column->set_medium_text( 'Assigned date').
@@ -194,6 +222,11 @@ FORM process_file .
       lo_column->set_short_text( 'Ret date ' ).
       lo_column->set_medium_text( 'Return date').
       lo_column->set_long_text( 'Return date').
+
+      lo_column ?= lo_columns->get_column( 'STATUS' ).
+      lo_column->set_short_text( 'Status' ).
+      lo_column->set_medium_text( 'Status').
+      lo_column->set_long_text( 'Status').
 
       lo_alv->display( ).
 
