@@ -235,3 +235,6 @@ FORM process_file .
   ENDTRY.
 
 ENDFORM.
+
+
+The program is designed to fetch and display material data using an ALV Grid output. Data retrieval is performed from multiple standard SAP tables such as MARA, MVKE, and MAKT based on user selection criteria. From MARA, the fields MATNR, ERSDA, ERNAM, MTART, MATKL, and MTPOS MARA are selected, with MATNR restricted by the input range S_MATNR and ERSDA filtered through S_ERSDA. The selected materials are then used to fetch corresponding sales organization data from MVKE, including MATNR, VKORG, MTPOS, BWERK, and KTGRM, with key linkage on MATNR = LT_MARA-MATNR, while VKORG and KTGRM are further restricted by the user input ranges S_VKORG and S_KTGRM. Additionally, materiall descriptions are retrieved from MAKT for the fields MATNR, SPRAS, and MAKTX, using the keys MATNR = LT_MARA-MATNR and SPRAS = SY-LANGU to ensure language-specific descriptions. The extracted data from these tables is combined into a final internal output structure, which is then displayed in an interactive ALV Grid for user-friendly reporting and analysis.
