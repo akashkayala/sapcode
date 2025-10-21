@@ -1,28 +1,32 @@
-1. Store the input file path in a local variable.
+This program provides a selection screen that allows the user to input the following details:
 
+Company Code
 
-2. Read the Excel file from the user’s desktop into an internal table using the function module ALSM_EXCEL_TO_INTERNAL_TABLE.
+Account Number
 
+Period
 
-3. If the file upload is successful, display a success message; otherwise, show an error message.
+Fiscal Year
 
+Ledger
 
-4. Retrieve LIFNR and KTOKK from table LFA1.
+⚙️ Output Options
 
+The user can choose from multiple output and processing options for convenience:
 
-5. Fetch LIFNR and EKORG from table LFM1 and WYT3 entries using LIFNR, EKORG, LTSNR, and WEEKS.
+ALV Display – View the report in an ALV grid format on the screen.
 
+Download – Download the report data to a local file (e.g., Excel or CSV).
 
-6. Loop through the LFM1 table and pass LIFNR and EKORG into the final work area.
+Email – Send the generated report via email.
 
+🔄 Combination Options
 
-7. Read the WYT3 table based on LIFNR and EKORG values.
+Users can perform individual actions such as only ALV display or only download.
 
+Users can also combine actions, for example:
 
-8. Map PARVW, PARZA, and LIF2 from WYT3 into the partner data structure.
+Display the ALV and send it via email.
 
-
-9. Assign the partner data to the functional key with vendor purchase task ‘U’.
-
-
-10. Pass LFA1 data to the vendor structure, call the method VMD_EI_API→MAINTAIN_BAPI, and perform error handli
+Download the file and send it via email.
+Perform all three actions together (ALV + Download + Email).
