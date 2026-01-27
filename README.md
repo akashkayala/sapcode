@@ -1,65 +1,34 @@
-1. Fetch user details
+FORM send_mail_with_table.
+  lv_html_body = '<html><body><h3>Flight Details:</h3>'.
+  lv_html_body = |{ lv_html_body }<table border="1" cellpadding="5" cellspacing="0">|.
+  lv_html_body = |{ lv_html_body }<tr><th>File Created</th><th>Company Code</th><th>Document Type</th><th>Currency</th><th>Sum of Debit</th><th>Sum of Credit</th><th>Document No</th><th>Success/Fail</th></tr>|.
 
-Selects user name (bname) and valid-to date (gltgb) from table USR02
+  LOOP AT lt_table ASSIGNING FIELD-SYMBOL(<fs_lt_table>).
+    lv_html_body = |{ lv_html_body }<tr>|.
+    lv_html_body = |{ lv_html_body }<td>{ <fs_lt_table>-carrid }</td>|.
+    lv_html_body = |{ lv_html_body }<td>{ <fs_lt_table>-connid }</td>|.
+    lv_html_body = |{ lv_html_body }<td>{ <fs_lt_table>-fldate DATE = USER }</td>|.
+    lv_html_body = |{ lv_html_body }<td>{ <fs_lt_table>-price }</td>|.
+    lv_html_body = |{ lv_html_body }</tr>|.
+  ENDLOOP.
 
-Only dialog users (USTYP = 'A') are considered
+  lv_html_body = |{ lv_html_body }</table></body></html>|.
 
-User selection is restricted using a selection range (s_user)
+  DATA(lt_soli) = cl_bcs_convert=>string_to_soli( iv_string = lv_html_body ).
+  DATA(lo_document) = cl_document_bcs=>create_document(
+      i_type    = 'HTM'
+      i_text    = lt_soli
+      i_subject = 'Dynamic Flight Information' ).
+  DATA(lo_sender)    = cl_sapuser_bcs=>create( sy-uname ).
+  DATA(lo_recipient) = cl_cam_address_bcs=>create_internet_address( 'pmeruva@publicstorage.com' ).
+  DATA(lo_send_request) = cl_bcs=>create_persistent( ).
+  lo_send_request->set_document( lo_document ).
+  lo_send_request->set_sender( i_sender = lo_sender ).
+  lo_send_request->add_recipient( i_recipient = lo_recipient ).
+  lo_send_request->set_send_immediately( abap_true ). " Send immediately
+  DATA(lv_sent_to_all) = lo_send_request->send( ).
 
-
-
-2. Check data availability
-
-Validates whether the SELECT statement fetched records using sy-subrc
-
-Processing continues only if data is available
-
-
-
-3. Loop through user records
-
-Loops over each entry in internal table gt_users
-
-Clears the final work area before populating new values
-
-
-
-4. Validate user validity date
-
-Checks if the user’s validity end date (gltgb) is greater than or equal to system date
-
-Ensures only currently active users are processed
-
-
-
-5. Generate email ID for valid users
-
-Concatenates the user name with company email domain (@cadence.com)
-
-Converts the email ID to lower case
-
-Stores the generated email ID in final structure
-
-
-
-6. Handle expired users
-
-If the validity date is less than system date
-
-Email ID is still generated using the same domain
-
-Converts email ID to lower case for consistency
-
-
-
-7. Populate final internal table
-
-Appends the processed user data into gt_final
-
-Clears the work area after each append to avoid data overlap
-
-
-
-8. End of processing
-
-Completes looping and exits FORM after data preparation
+  IF lv_sent_to_all = abap_true.
+    COMMIT WORK AND WAIT.
+  ENDIF.
+ENDFORM.
