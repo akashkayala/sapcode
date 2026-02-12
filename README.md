@@ -1,34 +1,89 @@
-FORM send_mail_with_table.
-  lv_html_body = '<html><body><h3>Flight Details:</h3>'.
-  lv_html_body = |{ lv_html_body }<table border="1" cellpadding="5" cellspacing="0">|.
-  lv_html_body = |{ lv_html_body }<tr><th>File Created</th><th>Company Code</th><th>Document Type</th><th>Currency</th><th>Sum of Debit</th><th>Sum of Credit</th><th>Document No</th><th>Success/Fail</th></tr>|.
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_file.
+  CALL FUNCTION 'F4_FILENAME'
+    IMPORTING
+      file_name = p_file.  
 
-  LOOP AT lt_table ASSIGNING FIELD-SYMBOL(<fs_lt_table>).
-    lv_html_body = |{ lv_html_body }<tr>|.
-    lv_html_body = |{ lv_html_body }<td>{ <fs_lt_table>-carrid }</td>|.
-    lv_html_body = |{ lv_html_body }<td>{ <fs_lt_table>-connid }</td>|.
-    lv_html_body = |{ lv_html_body }<td>{ <fs_lt_table>-fldate DATE = USER }</td>|.
-    lv_html_body = |{ lv_html_body }<td>{ <fs_lt_table>-price }</td>|.
-    lv_html_body = |{ lv_html_body }</tr>|.
-  ENDLOOP.
 
-  lv_html_body = |{ lv_html_body }</table></body></html>|.
 
-  DATA(lt_soli) = cl_bcs_convert=>string_to_soli( iv_string = lv_html_body ).
-  DATA(lo_document) = cl_document_bcs=>create_document(
-      i_type    = 'HTM'
-      i_text    = lt_soli
-      i_subject = 'Dynamic Flight Information' ).
-  DATA(lo_sender)    = cl_sapuser_bcs=>create( sy-uname ).
-  DATA(lo_recipient) = cl_cam_address_bcs=>create_internet_address( 'pmeruva@publicstorage.com' ).
-  DATA(lo_send_request) = cl_bcs=>create_persistent( ).
-  lo_send_request->set_document( lo_document ).
-  lo_send_request->set_sender( i_sender = lo_sender ).
-  lo_send_request->add_recipient( i_recipient = lo_recipient ).
-  lo_send_request->set_send_immediately( abap_true ). " Send immediately
-  DATA(lv_sent_to_all) = lo_send_request->send( ).
+  CREATE DATA lt_dref TYPE TABLE OF (p_table).
+  CREATE DATA ls_dref TYPE (p_table).
 
-  IF lv_sent_to_all = abap_true.
-    COMMIT WORK AND WAIT.
+  ASSIGN lt_dref->* TO <ft_table>.
+
+  ASSIGN ls_dref->* TO <fs_table>.
+
+  CALL FUNCTION 'ALSM_EXCEL_TO_INTERNAL_TABLE'
+    EXPORTING
+      filename                = p_file
+      i_begin_col             = 1
+      i_begin_row             = 1
+      i_end_col               = 99
+      i_end_row               = 999999
+    TABLES
+      intern                  = lt_excel
+    EXCEPTIONS
+      inconsistent_parameters = 1
+      upload_ole              = 2
+      OTHERS                  = 3.
+  IF sy-subrc EQ 0.
+    SORT lt_excel BY row.
+ LOOP AT lt_excel INTO DATA(ls_excel).
+
+   lv_col = ls_excel-col + 1.
+      ASSIGN COMPONENT lv_col OF STRUCTURE <fs_table> TO <dyn_field>.
+      IF sy-subrc = 0.
+
+            IF ls_excel-row = 1.
+              CALL FUNCTION 'DDIF_FIELDINFO_GET'
+                EXPORTING
+                  tabname        = p_table
+                TABLES
+                  dfies_tab      = lt_table_filds
+                EXCEPTIONS
+                  not_found      = 1
+                  internal_error = 2
+                  OTHERS         = 3.
+              READ TABLE lt_table_filds INTO DATA(ls_table_fields) INDEX lv_col.
+              IF sy-subrc = 0.
+                IF ls_table_fields-fieldname NE ls_excel-value.
+                  WRITE: 'Excel sheet data and Dynamic table fields are not matching'.
+                  EXIT.
+                ENDIF.
+              ENDIF.
+            ELSE.
+              <dyn_field> = ls_excel-value.
+            ENDIF.
+      ENDIF.
+      IF ls_excel-row GT 1.
+        AT END OF row.
+          APPEND <fs_table> TO <ft_table>.
+          CLEAR <fs_table>.
+        ENDAT.
+      ENDIF.
+    ENDLOOP.
+
+    IF <ft_table> IS NOT INITIAL.
+      IF p_test IS INITIAL.
+
+        MODIFY (p_table) FROM TABLE <ft_table>.
+        IF sy-subrc EQ 0.
+          COMMIT WORK.
+          DATA(lv_lines) = lines( <ft_table> ).
+          WRITE: TEXT-002,lv_lines.
+        ELSE.
+          ROLLBACK WORK.
+          MESSAGE TEXT-003 TYPE 'E' DISPLAY LIKE 'I'.
+        ENDIF.
+      ELSE.
+
+        cl_salv_table=>factory(
+          IMPORTING
+            r_salv_table   =  lo_alv
+          CHANGING
+            t_table        = <ft_table>
+        ).
+
+        lo_alv->display( ).
+      ENDIF.
+    ENDIF.
   ENDIF.
-ENDFORM.
