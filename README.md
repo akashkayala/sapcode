@@ -1,89 +1,71 @@
-AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_file.
-  CALL FUNCTION 'F4_FILENAME'
-    IMPORTING
-      file_name = p_file.  
+PARAMETERS: p_struct TYPE tabname DEFAULT 'ACDOCA',
+            p_file   TYPE string  DEFAULT 'C:\temp\Template.xlsx'.
 
+DATA: lo_struct     TYPE REF TO cl_abap_structdescr,
+      lo_table_desc TYPE REF TO cl_abap_tabledescr,
+      lr_data       TYPE REF TO data,
+      lo_salv       TYPE REF TO cl_salv_table,
+      lv_xml        TYPE xstring,
+      lt_binary_tab TYPE solix_tab,
+      lv_length     TYPE i.
 
+FIELD-SYMBOLS: <lt_template> TYPE STANDARD TABLE.
 
-  CREATE DATA lt_dref TYPE TABLE OF (p_table).
-  CREATE DATA ls_dref TYPE (p_table).
+START-OF-SELECTION.
 
-  ASSIGN lt_dref->* TO <ft_table>.
+  " 1. Get the Structure Definition from SE11
+  lo_struct ?= cl_abap_typedescr=>describe_by_name( p_struct ).
 
-  ASSIGN ls_dref->* TO <fs_table>.
+  " 2. Create Dynamic Table and Assign to Field Symbol
+  lo_table_desc = cl_abap_tabledescr=>create( lo_struct ).
+  CREATE DATA lr_data TYPE HANDLE lo_table_desc.
+  ASSIGN lr_data->* TO <lt_template>.
 
-  CALL FUNCTION 'ALSM_EXCEL_TO_INTERNAL_TABLE'
-    EXPORTING
-      filename                = p_file
-      i_begin_col             = 1
-      i_begin_row             = 1
-      i_end_col               = 99
-      i_end_row               = 999999
-    TABLES
-      intern                  = lt_excel
-    EXCEPTIONS
-      inconsistent_parameters = 1
-      upload_ole              = 2
-      OTHERS                  = 3.
-  IF sy-subrc EQ 0.
-    SORT lt_excel BY row.
- LOOP AT lt_excel INTO DATA(ls_excel).
+  " 3. Add an initial row for the template
+  APPEND INITIAL LINE TO <lt_template>.
 
-   lv_col = ls_excel-col + 1.
-      ASSIGN COMPONENT lv_col OF STRUCTURE <fs_table> TO <dyn_field>.
+  TRY.
+      " 4. Create SALV Instance (invisible, just for conversion)
+      cl_salv_table=>factory(
+        IMPORTING r_salv_table = lo_salv
+        CHANGING  t_table      = <lt_template> ).
+
+      " Set technical headers (identical to original logic)
+      DATA(lo_cols) = lo_salv->get_columns( ).
+      DATA(lt_cols) = lo_cols->get( ).
+      LOOP AT lt_cols INTO DATA(ls_col).
+        ls_col-r_column->set_short_text( |{ ls_col-columnname }| ).
+        ls_col-r_column->set_medium_text( |{ ls_col-columnname }| ).
+        ls_col-r_column->set_long_text( |{ ls_col-columnname }| ).
+      ENDLOOP.
+
+      " 5. Convert to XLSX XML Format
+      lv_xml = lo_salv->to_xml( if_salv_bs_xml=>c_type_xlsx ).
+
+      " 6. Convert XString to Binary Table
+      CALL FUNCTION 'SCMS_XSTRING_TO_BINARY'
+        EXPORTING
+          buffer          = lv_xml
+        IMPORTING
+          output_length   = lv_length
+        TABLES
+          binary_tab      = lt_binary_tab.
+
+      " 7. Download to Local System
+      cl_gui_frontend_services=>gui_download(
+        EXPORTING
+          bin_filesize = lv_length
+          filename     = p_file
+          filetype     = 'BIN'
+        CHANGING
+          data_tab     = lt_binary_tab
+        EXCEPTIONS
+          OTHERS       = 1 ).
+
       IF sy-subrc = 0.
-
-            IF ls_excel-row = 1.
-              CALL FUNCTION 'DDIF_FIELDINFO_GET'
-                EXPORTING
-                  tabname        = p_table
-                TABLES
-                  dfies_tab      = lt_table_filds
-                EXCEPTIONS
-                  not_found      = 1
-                  internal_error = 2
-                  OTHERS         = 3.
-              READ TABLE lt_table_filds INTO DATA(ls_table_fields) INDEX lv_col.
-              IF sy-subrc = 0.
-                IF ls_table_fields-fieldname NE ls_excel-value.
-                  WRITE: 'Excel sheet data and Dynamic table fields are not matching'.
-                  EXIT.
-                ENDIF.
-              ENDIF.
-            ELSE.
-              <dyn_field> = ls_excel-value.
-            ENDIF.
+        MESSAGE 'XLSX Template created successfully!' TYPE 'S'.
       ENDIF.
-      IF ls_excel-row GT 1.
-        AT END OF row.
-          APPEND <fs_table> TO <ft_table>.
-          CLEAR <fs_table>.
-        ENDAT.
-      ENDIF.
-    ENDLOOP.
 
-    IF <ft_table> IS NOT INITIAL.
-      IF p_test IS INITIAL.
-
-        MODIFY (p_table) FROM TABLE <ft_table>.
-        IF sy-subrc EQ 0.
-          COMMIT WORK.
-          DATA(lv_lines) = lines( <ft_table> ).
-          WRITE: TEXT-002,lv_lines.
-        ELSE.
-          ROLLBACK WORK.
-          MESSAGE TEXT-003 TYPE 'E' DISPLAY LIKE 'I'.
-        ENDIF.
-      ELSE.
-
-        cl_salv_table=>factory(
-          IMPORTING
-            r_salv_table   =  lo_alv
-          CHANGING
-            t_table        = <ft_table>
-        ).
-
-        lo_alv->display( ).
-      ENDIF.
-    ENDIF.
-  ENDIF.
+    CATCH cx_root.
+      MESSAGE 'Error generating XLSX.' TYPE 'E'.
+  ENDTRY.
