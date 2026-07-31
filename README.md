@@ -1,71 +1,112 @@
-PARAMETERS: p_struct TYPE tabname DEFAULT 'ACDOCA',
-            p_file   TYPE string  DEFAULT 'C:\temp\Template.xlsx'.
+REPORT zvbap_to_xlsx_al11.
 
-DATA: lo_struct     TYPE REF TO cl_abap_structdescr,
-      lo_table_desc TYPE REF TO cl_abap_tabledescr,
-      lr_data       TYPE REF TO data,
-      lo_salv       TYPE REF TO cl_salv_table,
-      lv_xml        TYPE xstring,
-      lt_binary_tab TYPE solix_tab,
-      lv_length     TYPE i.
+TYPES: BEGIN OF ty_vbap,
+         vbeln TYPE vbap-vbeln,
+         posnr TYPE vbap-posnr,
+         matnr TYPE vbap-matnr,
+         arktx TYPE vbap-arktx,
+         kwmeng TYPE vbap-kwmeng,
+         vrkme TYPE vbap-vrkme,
+         netwr TYPE vbap-netwr,
+       END OF ty_vbap.
 
-FIELD-SYMBOLS: <lt_template> TYPE STANDARD TABLE.
+DATA:
+  gt_vbap   TYPE TABLE OF ty_vbap,
+  gv_xstr   TYPE xstring,
+  gt_binary TYPE solix_tab.
 
-START-OF-SELECTION.
+DATA:
+  lo_document TYPE REF TO xco_cp_xlsx_document,
+  lo_sheet    TYPE REF TO xco_cp_xlsx_worksheet.
 
-  " 1. Get the Structure Definition from SE11
-  lo_struct ?= cl_abap_typedescr=>describe_by_name( p_struct ).
+*-----------------------------------------------------------------------
+* Fetch Data
+*-----------------------------------------------------------------------
+SELECT vbeln,
+       posnr,
+       matnr,
+       arktx,
+       kwmeng,
+       vrkme,
+       netwr
+  FROM vbap
+  INTO TABLE @gt_vbap
+  UP TO 10 ROWS.
 
-  " 2. Create Dynamic Table and Assign to Field Symbol
-  lo_table_desc = cl_abap_tabledescr=>create( lo_struct ).
-  CREATE DATA lr_data TYPE HANDLE lo_table_desc.
-  ASSIGN lr_data->* TO <lt_template>.
+IF sy-subrc <> 0.
+  WRITE : 'No data found'.
+  EXIT.
+ENDIF.
 
-  " 3. Add an initial row for the template
-  APPEND INITIAL LINE TO <lt_template>.
+*-----------------------------------------------------------------------
+* Create XLSX
+*-----------------------------------------------------------------------
 
-  TRY.
-      " 4. Create SALV Instance (invisible, just for conversion)
-      cl_salv_table=>factory(
-        IMPORTING r_salv_table = lo_salv
-        CHANGING  t_table      = <lt_template> ).
+lo_document = xco_cp_xlsx=>document->empty( ).
 
-      " Set technical headers (identical to original logic)
-      DATA(lo_cols) = lo_salv->get_columns( ).
-      DATA(lt_cols) = lo_cols->get( ).
-      LOOP AT lt_cols INTO DATA(ls_col).
-        ls_col-r_column->set_short_text( |{ ls_col-columnname }| ).
-        ls_col-r_column->set_medium_text( |{ ls_col-columnname }| ).
-        ls_col-r_column->set_long_text( |{ ls_col-columnname }| ).
-      ENDLOOP.
+lo_sheet = lo_document->worksheet->at_position( 1 ).
 
-      " 5. Convert to XLSX XML Format
-      lv_xml = lo_salv->to_xml( if_salv_bs_xml=>c_type_xlsx ).
+"Header
+lo_sheet->cell( row = 1 column = 1 )->value = 'Sales Order'.
+lo_sheet->cell( row = 1 column = 2 )->value = 'Item'.
+lo_sheet->cell( row = 1 column = 3 )->value = 'Material'.
+lo_sheet->cell( row = 1 column = 4 )->value = 'Description'.
+lo_sheet->cell( row = 1 column = 5 )->value = 'Quantity'.
+lo_sheet->cell( row = 1 column = 6 )->value = 'UOM'.
+lo_sheet->cell( row = 1 column = 7 )->value = 'Net Value'.
 
-      " 6. Convert XString to Binary Table
-      CALL FUNCTION 'SCMS_XSTRING_TO_BINARY'
-        EXPORTING
-          buffer          = lv_xml
-        IMPORTING
-          output_length   = lv_length
-        TABLES
-          binary_tab      = lt_binary_tab.
+DATA(lv_row) = 2.
 
-      " 7. Download to Local System
-      cl_gui_frontend_services=>gui_download(
-        EXPORTING
-          bin_filesize = lv_length
-          filename     = p_file
-          filetype     = 'BIN'
-        CHANGING
-          data_tab     = lt_binary_tab
-        EXCEPTIONS
-          OTHERS       = 1 ).
+LOOP AT gt_vbap INTO DATA(gs_vbap).
 
-      IF sy-subrc = 0.
-        MESSAGE 'XLSX Template created successfully!' TYPE 'S'.
-      ENDIF.
+  lo_sheet->cell( row = lv_row column = 1 )->value = gs_vbap-vbeln.
+  lo_sheet->cell( row = lv_row column = 2 )->value = gs_vbap-posnr.
+  lo_sheet->cell( row = lv_row column = 3 )->value = gs_vbap-matnr.
+  lo_sheet->cell( row = lv_row column = 4 )->value = gs_vbap-arktx.
+  lo_sheet->cell( row = lv_row column = 5 )->value = gs_vbap-kwmeng.
+  lo_sheet->cell( row = lv_row column = 6 )->value = gs_vbap-vrkme.
+  lo_sheet->cell( row = lv_row column = 7 )->value = gs_vbap-netwr.
 
-    CATCH cx_root.
-      MESSAGE 'Error generating XLSX.' TYPE 'E'.
-  ENDTRY.
+  lv_row = lv_row + 1.
+
+ENDLOOP.
+
+*-----------------------------------------------------------------------
+* Convert XLSX to XSTRING
+*-----------------------------------------------------------------------
+
+gv_xstr = lo_document->write_to_xstring( ).
+
+*-----------------------------------------------------------------------
+* Convert XSTRING -> Binary
+*-----------------------------------------------------------------------
+
+CALL FUNCTION 'SCMS_XSTRING_TO_BINARY'
+  EXPORTING
+    buffer     = gv_xstr
+  TABLES
+    binary_tab = gt_binary.
+
+*-----------------------------------------------------------------------
+* Write to AL11
+*-----------------------------------------------------------------------
+
+DATA(lv_file) = '/usr/sap/tmp/VBAP_DATA.xlsx'.
+
+OPEN DATASET lv_file
+FOR OUTPUT
+IN BINARY MODE.
+
+IF sy-subrc <> 0.
+  WRITE: 'Unable to open file'.
+  EXIT.
+ENDIF.
+
+LOOP AT gt_binary INTO DATA(ls_bin).
+  TRANSFER ls_bin TO lv_file.
+ENDLOOP.
+
+CLOSE DATASET lv_file.
+
+WRITE : / 'Excel file created successfully.'.
+WRITE : / lv_file.
